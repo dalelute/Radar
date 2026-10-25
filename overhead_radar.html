@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#06120d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Overhead Radar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: radar scope fills the left; the plane card and nearby list stack on the right (below on phones). */
+:root {
+  color-scheme: dark;
+  --bg: #06120d;          /* scope-room dark green-black */
+  --panel: #0c1f17;
+  --line: #1d3d2e;
+  --phosphor: #43e08f;    /* radar green */
+  --phosphor-dim: #2a8a5a;
+  --amber: #ffc94a;       /* aircraft blips */
+  --fg: #e4f3ea;
+  --muted: #8fb5a1;
+  --warn: #ff7a5c;
+  --font-display: "Chakra Petch", "Rajdhani", "Segoe UI", sans-serif;
+  --font-body: "Atkinson Hyperlegible", "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.4;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--phosphor); outline-offset: 2px; }
+
+header {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px;
+  padding-bottom: 12px;
+}
+h1 {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.4rem;
+  letter-spacing: .06em; text-transform: uppercase; margin: 0; color: var(--phosphor);
+}
+.weather { font-variant-numeric: tabular-nums; color: var(--fg); display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.weather .temp { font-family: var(--font-display); font-size: 1.4rem; font-weight: 600; }
+.weather .rest { color: var(--muted); font-size: .95rem; }
+.spacer { flex: 1; }
+.ghost {
+  background: transparent; border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 12px; color: var(--muted);
+}
+.ghost:hover { color: var(--fg); border-color: var(--phosphor-dim); }
+
+main {
+  display: grid; gap: 16px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  align-items: start;
+}
+@media (max-width: 760px) { main { grid-template-columns: minmax(0, 1fr); } }
+
+.scope-wrap { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.scope { width: 100%; max-width: 100%; aspect-ratio: 1; position: relative; }
+canvas { width: 100%; height: 100%; display: block; touch-action: manipulation; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button {
+  background: transparent; border: 0; padding: 8px 14px; color: var(--muted);
+  font-family: var(--font-display); font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--phosphor); color: var(--bg); }
+.status { font-size: .85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.status.bad { color: var(--warn); }
+
+aside { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  overflow: hidden;
+}
+.photo {
+  aspect-ratio: 3 / 2; max-width: 100%; background: #0a1913;
+  display: grid; place-items: center; color: var(--muted); font-size: .9rem; text-align: center; padding: 0;
+}
+.photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.credit { font-size: .75rem; color: var(--muted); padding: 6px 14px 0; }
+.credit a { color: var(--muted); }
+.card-body { padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+.eyebrow { font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--phosphor-dim); font-weight: 700; }
+.callsign { font-family: var(--font-display); font-weight: 700; font-size: 2.2rem; line-height: 1; color: var(--fg); letter-spacing: .02em; }
+.what { color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+.stat { border-top: 1px solid var(--line); padding-top: 6px; }
+.stat .k { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.stat .v { font-family: var(--font-display); font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--amber); }
+.empty { padding: 28px 16px; color: var(--muted); text-align: center; }
+
+.list { display: flex; flex-direction: column; }
+.list h2 { font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--phosphor-dim); margin: 0 0 6px; }
+.row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: baseline;
+  background: transparent; border: 0; border-bottom: 1px solid var(--line);
+  padding: 9px 4px; text-align: left; font-variant-numeric: tabular-nums;
+}
+.row:hover { background: var(--panel); }
+.row[aria-current="true"] .rc { color: var(--phosphor); }
+.rc { font-family: var(--font-display); font-weight: 600; font-size: 1.05rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc small { font-family: var(--font-body); font-weight: 400; color: var(--muted); font-size: .8rem; margin-left: 6px; }
+.ra, .rd { color: var(--muted); font-size: .9rem; }
+
+/* settings sheet */
+.sheet {
+  position: fixed; inset: 0; background: rgba(2, 8, 5, .72);
+  display: grid; place-items: center; z-index: 20;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+.sheet-inner {
+  width: 100%; max-width: 440px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 14px;
+}
+.sheet h2 { font-family: var(--font-display); margin: 0; font-size: 1.3rem; letter-spacing: .04em; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: .8rem; color: var(--muted); }
+.field input, .field select {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px; font: inherit; font-variant-numeric: tabular-nums; width: 100%;
+}
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hint { font-size: .82rem; color: var(--muted); margin: 0; }
+.hint.bad { color: var(--warn); }
+.actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.primary { background: var(--phosphor); color: var(--bg); border: 0; border-radius: 8px; padding: 10px 18px; font-weight: 700; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Overhead Radar</h1>
+  <div class="weather" id="weather" aria-live="polite"><span class="rest">Loading weather…</span></div>
+  <div class="spacer"></div>
+  <button class="ghost" id="openSettings" type="button">Settings</button>
+</header>
+
+<main>
+  <section class="scope-wrap" aria-label="Radar">
+    <div class="scope"><canvas id="scope" aria-label="Radar scope showing nearby aircraft. Tap a plane to see it."></canvas></div>
+    <div class="controls">
+      <div class="seg" id="ranges" role="group" aria-label="Radar range"></div>
+      <span class="status" id="status">Looking for planes…</span>
+    </div>
+  </section>
+
+  <aside>
+    <article class="card" id="card" aria-live="polite">
+      <div class="empty">No planes nearby yet. They'll appear on the radar as they come in range.</div>
+    </article>
+    <section class="list" aria-label="Nearby aircraft">
+      <h2>Nearby</h2>
+      <div id="list"></div>
+    </section>
+  </aside>
+</main>
+
+<div class="sheet" id="sheet" hidden>
+  <form class="sheet-inner" id="settingsForm">
+    <h2>Settings</h2>
+    <p class="hint">The radar centers on this spot. Right-click a place in Google Maps to copy its coordinates.</p>
+    <div class="two">
+      <div class="field"><label for="lat">Latitude</label><input id="lat" type="text" autocomplete="off" spellcheck="false"></div>
+      <div class="field"><label for="lon">Longitude</label><input id="lon" type="text" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <button class="ghost" id="useGps" type="button">Use this device's location</button>
+    <div class="field">
+      <label for="units">Weather units</label>
+      <select id="units">
+        <option value="us">US (°F, mph)</option>
+        <option value="metric">Metric (°C, km/h)</option>
+      </select>
+    </div>
+    <p class="hint" id="formMsg"></p>
+    <div class="actions">
+      <button class="ghost" id="cancel" type="button">Cancel</button>
+      <button class="primary" type="submit">Save</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(() => {
+  // ---------- settings ----------
+  const DEFAULTS = { lat: 41.1537, lon: -81.3579, units: "us", range: 10 };
+  const RANGES = [5, 10, 15, 25];
+  const FETCH_NM = 25;
+  let S = { ...DEFAULTS };
+  try { Object.assign(S, JSON.parse(localStorage.getItem("radar-settings") || "{}")); } catch (e) {}
+  const save = () => { try { localStorage.setItem("radar-settings", JSON.stringify(S)); } catch (e) {} };
+
+  // ---------- state ----------
+  let planes = [], fetchedAt = 0, selHex = null, okOnce = false;
+  let blips = [];
+  const photoCache = new Map();
+  const $ = (id) => document.getElementById(id);
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ---------- data ----------
+  const SOURCES = [
+    (la, lo, r) => `https://api.adsb.lol/v2/point/${la}/${lo}/${r}`,
+    (la, lo, r) => `https://opendata.adsb.fi/api/v2/lat/${la}/lon/${lo}/dist/${r}`,
+  ];
+  let sourceIdx = 0;
+
+  function norm(a) {
+    const altNum = typeof a.alt_baro === "number" ? a.alt_baro : null;
+    return {
+      hex: a.hex || "",
+      call: (a.flight || a.r || a.hex || "?").trim(),
+      reg: a.r || "", type: a.t || "", desc: a.desc || "", op: a.ownOp || "",
+      lat: a.lat, lon: a.lon,
+      alt: altNum, ground: a.alt_baro === "ground",
+      gs: a.gs || 0, track: a.track || 0, vrate: a.baro_rate || a.geom_rate || 0,
+      age: a.seen_pos || 0,
+    };
+  }
+
+  async function fetchPlanes() {
+    const la = S.lat.toFixed(4), lo = S.lon.toFixed(4);
+    for (let i = 0; i < SOURCES.length; i++) {
+      const idx = (sourceIdx + i) % SOURCES.length;
+      try {
+        const res = await fetch(SOURCES[idx](la, lo, FETCH_NM), { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const j = await res.json();
+        const list = j.ac || j.aircraft || [];
+        planes = list.filter(a => typeof a.lat === "number" && typeof a.lon === "number").map(norm);
+        fetchedAt = Date.now();
+        sourceIdx = idx;
+        okOnce = true;
+        setStatus("");
+        renderPanel();
+        return;
+      } catch (e) { /* try the next source */ }
+    }
+    setStatus(okOnce ? "Lost connection to flight data. Retrying…"
+                     : "This browser can't reach the flight data services. Check the connection; if it keeps happening, the page needs a small relay.", true);
+  }
+
+  async function fetchWeather() {
+    const metric = S.units === "metric";
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${S.lat.toFixed(4)}&longitude=${S.lon.toFixed(4)}` +
+      `&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m` +
+      `&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto` +
+      `&temperature_unit=${metric ? "celsius" : "fahrenheit"}&wind_speed_unit=${metric ? "kmh" : "mph"}`;
+    try {
+      const j = await (await fetch(url)).json();
+      const c = j.current, d = j.daily, u = metric ? "C" : "F";
+      $("weather").innerHTML = "";
+      const t = document.createElement("span"); t.className = "temp"; t.textContent = `${Math.round(c.temperature_2m)}°${u}`;
+      const r = document.createElement("span"); r.className = "rest";
+      r.textContent = `${wxText(c.weather_code)} · High ${Math.round(d.temperature_2m_max[0])}° Low ${Math.round(d.temperature_2m_min[0])}° · Wind ${Math.round(c.wind_speed_10m)} ${metric ? "km/h" : "mph"} ${compass(c.wind_direction_10m)}`;
+      $("weather").append(t, r);
+    } catch (e) {
+      $("weather").innerHTML = '<span class="rest">Weather unavailable</span>';
+    }
+  }
+
+  function wxText(c) {
+    if (c === 0) return "Clear"; if (c === 1) return "Mostly clear"; if (c === 2) return "Partly cloudy";
+    if (c === 3) return "Overcast"; if (c === 45 || c === 48) return "Fog";
+    if (c >= 51 && c <= 57) return "Drizzle"; if (c >= 61 && c <= 67) return "Rain";
+    if (c >= 71 && c <= 77) return "Snow"; if (c >= 80 && c <= 82) return "Showers";
+    if (c === 85 || c === 86) return "Snow showers"; if (c >= 95) return "Thunderstorm";
+    return "";
+  }
+  const compass = (deg) => ["N","NE","E","SE","S","SW","W","NW"][Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+
+  function getPhoto(hex) {
+    if (!hex || hex.startsWith("~")) return Promise.resolve(null);
+    if (!photoCache.has(hex)) {
+      photoCache.set(hex, fetch(`https://api.planespotters.net/pub/photos/hex/${hex}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(j => {
+          const p = j && j.photos && j.photos[0];
+          return p ? { src: (p.thumbnail_large || p.thumbnail).src, by: p.photographer || "unknown", link: p.link } : null;
+        })
+        .catch(() => null));
+    }
+    return photoCache.get(hex);
+  }
+
+  // ---------- geometry ----------
+  function position(p, now) {
+    const secs = (now - fetchedAt) / 1000 + p.age;
+    const moved = p.gs * secs / 3600;
+    const tr = p.track * Math.PI / 180;
+    const cosLat = Math.cos(S.lat * Math.PI / 180);
+    const lat = p.lat + moved * Math.cos(tr) / 60;
+    const lon = p.lon + moved * Math.sin(tr) / (60 * cosLat);
+    const dx = (lon - S.lon) * 60 * cosLat, dy = (lat - S.lat) * 60;
+    return { dx, dy, dist: Math.hypot(dx, dy), brg: ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360 };
+  }
+
+  function focusPlane(now) {
+    let best = null, bestD = Infinity;
+    for (const p of planes) {
+      const g = position(p, now);
+      if (selHex && p.hex === selHex) return { p, g, picked: true };
+      if (!p.ground && g.dist < bestD) { bestD = g.dist; best = { p, g, picked: false }; }
+    }
+    return best;
+  }
+
+  // ---------- drawing ----------
+  const cv = $("scope"), ctx = cv.getContext("2d");
+  const css = getComputedStyle(document.documentElement);
+  const C = (n) => css.getPropertyValue(n).trim();
+  const COL = { phos: C("--phosphor"), dim: C("--phosphor-dim"), line: C("--line"), amber: C("--amber"), fg: C("--fg"), muted: C("--muted") };
+  let sweep = 0, lastT = performance.now();
+
+  function draw(t) {
+    const dpr = window.devicePixelRatio || 1;
+    const size = cv.clientWidth;
+    if (cv.width !== Math.round(size * dpr)) { cv.width = Math.round(size * dpr); cv.height = Math.round(size * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const c = size / 2, R = size / 2 - 22;
+    const now = Date.now();
+    if (!reduceMotion) sweep = (sweep + (t - lastT) / 4000 * 360) % 360;
+    lastT = t;
+
+    ctx.clearRect(0, 0, size, size);
+    const bg = ctx.createRadialGradient(c, c, 0, c, c, R);
+    bg.addColorStop(0, "#0b2a1c"); bg.addColorStop(1, "#06150f");
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(c, c, R, 0, Math.PI * 2); ctx.fill();
+
+    // rings with distance labels
+    ctx.strokeStyle = COL.line; ctx.lineWidth = 1;
+    ctx.font = `600 ${Math.max(10, size / 52)}px ${css.getPropertyValue("--font-display")}`;
+    ctx.fillStyle = COL.dim; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    for (let k = 1; k <= 4; k++) {
+      ctx.beginPath(); ctx.arc(c, c, R * k / 4, 0, Math.PI * 2); ctx.stroke();
+      const nm = S.range * k / 4;
+      ctx.fillText(`${Number.isInteger(nm) ? nm : nm.toFixed(1)} nm`, c + 4, c - R * k / 4 - 2);
+    }
+    ctx.beginPath(); ctx.moveTo(c - R, c); ctx.lineTo(c + R, c); ctx.moveTo(c, c - R); ctx.lineTo(c, c + R); ctx.stroke();
+
+    // compass letters
+    ctx.fillStyle = COL.phos; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.font = `700 ${Math.max(12, size / 38)}px ${css.getPropertyValue("--font-display")}`;
+    ctx.fillText("N", c, c - R - 11); ctx.fillText("S", c, c + R + 11);
+    ctx.fillText("E", c + R + 11, c); ctx.fillText("W", c - R - 11, c);
+
+    // sweep wedge
+    if (!reduceMotion) {
+      const a = (sweep - 90) * Math.PI / 180;
+      if (ctx.createConicGradient) {
+        const g = ctx.createConicGradient(a - 0.6, c, c);
+        g.addColorStop(0, "rgba(67,224,143,0)"); g.addColorStop(0.095, "rgba(67,224,143,0.28)"); g.addColorStop(0.0955, "rgba(67,224,143,0)");
+        ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(c, c); ctx.arc(c, c, R, a - 0.6, a); ctx.closePath(); ctx.fill();
+      }
+      ctx.strokeStyle = COL.phos; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(c, c); ctx.lineTo(c + R * Math.cos(a), c + R * Math.sin(a)); ctx.stroke();
+    }
+
+    // home
+    ctx.fillStyle = COL.phos; ctx.beginPath(); ctx.arc(c, c, 4, 0, Math.PI * 2); ctx.fill();
+
+    // aircraft
+    blips = [];
+    const lab = Math.max(11, size / 48);
+    for (const p of planes) {
+      const g = position(p, now);
+      if (g.dist > S.range) continue;
+      const x = c + g.dx / S.range * R, y = c - g.dy / S.range * R;
+      const behind = ((sweep - g.brg) % 360 + 360) % 360;
+      const glow = reduceMotion ? 1 : Math.max(0.55, 1 - behind / 360);
+      const color = p.ground ? COL.muted : COL.amber;
+      ctx.globalAlpha = glow;
+      drawPlane(x, y, p.track, color, Math.max(7, size / 60));
+      ctx.globalAlpha = 1;
+      if (p.hex === selHex) { ctx.strokeStyle = COL.fg; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, Math.max(14, size / 32), 0, Math.PI * 2); ctx.stroke(); }
+      if (!p.ground) {
+        ctx.font = `600 ${lab}px ${css.getPropertyValue("--font-display")}`;
+        ctx.fillStyle = color; ctx.textAlign = "left"; ctx.textBaseline = "top";
+        ctx.fillText(p.call, x + 10, y + 4);
+        ctx.fillStyle = COL.muted; ctx.font = `500 ${lab * 0.85}px ${css.getPropertyValue("--font-display")}`;
+        ctx.fillText(p.alt != null ? `${(p.alt / 1000).toFixed(1)}k ft` : "", x + 10, y + 4 + lab);
+      }
+      blips.push({ x, y, hex: p.hex });
+    }
+
+    // refresh the "updated" age once a second
+    if (okOnce && t - lastStatus > 1000) { lastStatus = t; updateAge(); }
+    requestAnimationFrame(draw);
+  }
+  let lastStatus = 0;
+
+  function drawPlane(x, y, track, color, s) {
+    const a = track * Math.PI / 180;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(0, -s); ctx.lineTo(s * 0.18, -s * 0.2); ctx.lineTo(s * 0.9, s * 0.25); ctx.lineTo(s * 0.9, s * 0.42);
+    ctx.lineTo(s * 0.16, s * 0.22); ctx.lineTo(s * 0.12, s * 0.7); ctx.lineTo(s * 0.4, s * 0.95); ctx.lineTo(0, s * 0.85);
+    ctx.lineTo(-s * 0.4, s * 0.95); ctx.lineTo(-s * 0.12, s * 0.7); ctx.lineTo(-s * 0.16, s * 0.22);
+    ctx.lineTo(-s * 0.9, s * 0.42); ctx.lineTo(-s * 0.9, s * 0.25); ctx.lineTo(-s * 0.18, -s * 0.2);
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
+  cv.addEventListener("click", (e) => {
+    const r = cv.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    let best = null, bestD = (Math.max(24, r.width / 16)) ** 2;
+    for (const b of blips) { const d = (b.x - x) ** 2 + (b.y - y) ** 2; if (d < bestD) { bestD = d; best = b; } }
+    selHex = best ? best.hex : null;
+    renderPanel();
+  });
+
+  // ---------- panel ----------
+  let cardHex = null;
+  function renderPanel() {
+    const now = Date.now();
+    const f = focusPlane(now);
+    const card = $("card");
+    if (!f) {
+      cardHex = null;
+      card.innerHTML = `<div class="empty">${okOnce ? "No planes in the air nearby right now." : "Looking for planes…"}</div>`;
+    } else {
+      const { p, g, picked } = f;
+      if (cardHex !== p.hex) {
+        cardHex = p.hex;
+        card.innerHTML = `
+          <div class="photo" id="photo">Looking for a photo…</div>
+          <div class="credit" id="credit"></div>
+          <div class="card-body">
+            <div class="eyebrow" id="eyebrow"></div>
+            <div class="callsign" id="cs"></div>
+            <div class="what" id="what"></div>
+            <div class="stats">
+              <div class="stat"><div class="k">Altitude</div><div class="v" id="sAlt"></div></div>
+              <div class="stat"><div class="k">Speed</div><div class="v" id="sSpd"></div></div>
+              <div class="stat"><div class="k">Distance</div><div class="v" id="sDst"></div></div>
+              <div class="stat"><div class="k">Heading</div><div class="v" id="sHdg"></div></div>
+            </div>
+          </div>`;
+        const want = p.hex;
+        getPhoto(p.hex).then(ph => {
+          if (cardHex !== want) return;
+          const box = $("photo"), cr = $("credit");
+          if (!ph) { box.textContent = "No photo on file for this aircraft"; return; }
+          const img = new Image();
+          img.alt = `Photo of ${p.reg || p.call}`;
+          img.onload = () => { box.textContent = ""; box.append(img); };
+          img.onerror = () => { box.textContent = "Photo couldn't load"; };
+          img.src = ph.src;
+          cr.innerHTML = "";
+          const a = document.createElement("a");
+          a.href = ph.link; a.target = "_blank"; a.rel = "noopener";
+          a.textContent = `Photo © ${ph.by} / Planespotters.net`;
+          cr.append(a);
+        });
+      }
+      $("eyebrow").textContent = picked ? "Selected aircraft" : "Closest aircraft";
+      $("cs").textContent = p.call;
+      $("what").textContent = [p.desc || p.type, p.op, p.reg].filter(Boolean).join(" · ") || "Aircraft details unknown";
+      $("sAlt").textContent = p.ground ? "On ground" : p.alt != null ? `${p.alt.toLocaleString()} ft` : "—";
+      $("sSpd").textContent = `${Math.round(p.gs)} kt`;
+      $("sDst").textContent = `${g.dist.toFixed(1)} nm ${compass(g.brg)}`;
+      $("sHdg").textContent = `${Math.round(p.track)}° ${p.vrate > 300 ? "↑" : p.vrate < -300 ? "↓" : ""}`;
+    }
+    renderList(now);
+  }
+
+  function renderList(now) {
+    const rows = planes.map(p => ({ p, g: position(p, now) }))
+      .filter(r => r.g.dist <= FETCH_NM)
+      .sort((a, b) => a.g.dist - b.g.dist).slice(0, 8);
+    const list = $("list");
+    list.innerHTML = "";
+    if (!rows.length) { list.innerHTML = '<div class="status">Nothing within 25 nm.</div>'; return; }
+    for (const { p, g } of rows) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "row";
+      if (p.hex === selHex) b.setAttribute("aria-current", "true");
+      const rc = document.createElement("span"); rc.className = "rc"; rc.textContent = p.call;
+      const sm = document.createElement("small"); sm.textContent = p.type; rc.append(sm);
+      const ra = document.createElement("span"); ra.className = "ra";
+      ra.textContent = p.ground ? "ground" : p.alt != null ? `${p.alt.toLocaleString()} ft` : "";
+      const rd = document.createElement("span"); rd.className = "rd"; rd.textContent = `${g.dist.toFixed(1)} nm`;
+      b.append(rc, ra, rd);
+      b.addEventListener("click", () => {
+        selHex = p.hex;
+        if (g.dist > S.range) { S.range = RANGES.find(r => r >= g.dist) || 25; save(); renderRanges(); }
+        renderPanel();
+      });
+      list.append(b);
+    }
+  }
+
+  function setStatus(msg, bad) {
+    const s = $("status");
+    s.classList.toggle("bad", !!bad);
+    if (msg) s.textContent = msg; else updateAge();
+  }
+  function updateAge() {
+    const s = $("status");
+    if (s.classList.contains("bad")) return;
+    const secs = Math.round((Date.now() - fetchedAt) / 1000);
+    const n = planes.filter(p => position(p, Date.now()).dist <= S.range).length;
+    s.textContent = `${n} aircraft in range · updated ${secs}s ago`;
+  }
+
+  function renderRanges() {
+    const box = $("ranges");
+    box.innerHTML = "";
+    for (const r of RANGES) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = `${r} nm`;
+      b.setAttribute("aria-pressed", String(S.range === r));
+      b.addEventListener("click", () => { S.range = r; save(); renderRanges(); });
+      box.append(b);
+    }
+  }
+
+  // ---------- settings sheet ----------
+  const sheet = $("sheet");
+  $("openSettings").addEventListener("click", () => {
+    $("lat").value = S.lat; $("lon").value = S.lon; $("units").value = S.units;
+    $("formMsg").textContent = ""; $("formMsg").classList.remove("bad");
+    sheet.hidden = false; $("lat").focus();
+  });
+  $("cancel").addEventListener("click", () => { sheet.hidden = true; });
+  sheet.addEventListener("click", (e) => { if (e.target === sheet) sheet.hidden = true; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") sheet.hidden = true; });
+  $("useGps").addEventListener("click", () => {
+    const msg = $("formMsg");
+    if (!navigator.geolocation) { msg.textContent = "This browser can't share its location. Type the coordinates instead."; msg.classList.add("bad"); return; }
+    msg.textContent = "Finding location…"; msg.classList.remove("bad");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { $("lat").value = pos.coords.latitude.toFixed(4); $("lon").value = pos.coords.longitude.toFixed(4); msg.textContent = "Location found. Press Save to use it."; },
+      () => { msg.textContent = "Location wasn't shared. Allow it in the browser, or type the coordinates."; msg.classList.add("bad"); },
+      { timeout: 15000 });
+  });
+  $("settingsForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const la = parseFloat($("lat").value), lo = parseFloat($("lon").value);
+    const msg = $("formMsg");
+    if (!(la >= -90 && la <= 90) || !(lo >= -180 && lo <= 180)) {
+      msg.textContent = "Latitude must be between -90 and 90, longitude between -180 and 180.";
+      msg.classList.add("bad"); return;
+    }
+    S.lat = la; S.lon = lo; S.units = $("units").value; save();
+    planes = []; selHex = null; cardHex = null; okOnce = false;
+    sheet.hidden = true;
+    renderPanel(); fetchPlanes(); fetchWeather();
+  });
+
+  // ---------- start ----------
+  renderRanges();
+  renderPanel();
+  fetchPlanes();
+  fetchWeather();
+  setInterval(fetchPlanes, 10000);
+  setInterval(fetchWeather, 600000);
+  setInterval(() => renderPanel(), 2000);
+  requestAnimationFrame(draw);
+  if (navigator.wakeLock) navigator.wakeLock.request("screen").catch(() => {});
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && navigator.wakeLock) navigator.wakeLock.request("screen").catch(() => {});
+  });
+})();
+</script>
+</body>
+</html>
